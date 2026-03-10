@@ -27,24 +27,24 @@
                 </h1>
                 <p class="text-slate-500 mt-2">獨立網頁版 - 支援歷史與月度男女分項加總</p>
             </div>
-            <div id="auth-status" class="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
-                <div class="w-2 h-2 bg-amber-500 rounded-full animate-pulse" id="status-dot"></div>
-                <span class="text-xs font-semibold text-slate-600" id="status-text">正在連接資料庫...</span>
+            <div class="flex items-center gap-2">
+                <button id="refresh-btn" class="p-2 bg-white rounded-full border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-600" title="手動重新同步">
+                    <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                </button>
+                <div id="auth-status" class="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+                    <div class="w-2 h-2 bg-amber-500 rounded-full animate-pulse" id="status-dot"></div>
+                    <span class="text-xs font-semibold text-slate-600" id="status-text">正在連接資料庫...</span>
+                </div>
             </div>
         </header>
 
-        <!-- 錯誤診斷提示框 (預設隱藏) -->
+        <!-- 錯誤診斷提示框 -->
         <div id="error-box" class="hidden mb-8 bg-red-50 border border-red-200 p-4 rounded-2xl">
             <h4 class="text-red-800 font-bold flex items-center gap-2 mb-2">
                 <i data-lucide="alert-circle" class="w-5 h-5"></i>
                 連線失敗：設定未完成
             </h4>
-            <p class="text-red-700 text-sm leading-relaxed" id="error-message">
-                請確保您已在 Firebase Console 中啟用了「匿名登入 (Anonymous Auth)」。
-            </p>
-            <a href="https://console.firebase.google.com/" target="_blank" class="mt-3 inline-block bg-red-600 text-white text-xs px-4 py-2 rounded-lg font-bold hover:bg-red-700 transition-colors">
-                前往 Firebase 設定
-            </a>
+            <p class="text-red-700 text-sm leading-relaxed" id="error-message"></p>
         </div>
 
         <!-- Dashboard Statistics -->
@@ -217,10 +217,9 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // Firebase 配置
         const firebaseConfig = {
             apiKey: "AIzaSyBA3OciKb9v1lRKd482bQM8YaZDKQS25Zg",
             authDomain: "my-activity-tracker-188dd.firebaseapp.com",
@@ -245,6 +244,7 @@
         const errorMessage = document.getElementById('error-message');
 
         let allRecords = [];
+        let unsubscribe = null;
 
         // 初始化日期
         const now = new Date();
@@ -253,33 +253,30 @@
         document.getElementById('endTime').value = new Date(now.getTime() + 3600000).toTimeString().slice(0, 5);
         monthFilter.value = now.toISOString().slice(0, 7);
 
-        lucide.createIcons();
+        // 手動同步按鈕
+        document.getElementById('refresh-btn').onclick = () => {
+            const icon = document.querySelector('#refresh-btn i');
+            icon.classList.add('loading-spinner');
+            startListening();
+            setTimeout(() => icon.classList.remove('loading-spinner'), 1000);
+        };
 
-        // 登入處理 (核心修復邏輯)
+        // 登入處理
         const login = async () => {
             try {
-                statusText.innerText = "正在進行匿名身份驗證...";
+                statusText.innerText = "驗證中...";
                 await signInAnonymously(auth);
             } catch (e) {
-                console.error("Auth Error:", e);
                 errorBox.classList.remove('hidden');
                 statusDot.classList.replace('bg-amber-500', 'bg-red-500');
-                statusDot.classList.remove('animate-pulse');
-                
-                if (e.code === 'auth/configuration-not-found') {
-                    statusText.innerText = "Firebase 設定未開啟";
-                    errorMessage.innerHTML = "<strong>錯誤 (auth/configuration-not-found)：</strong> 您尚未在 Firebase 控制台中開啟『匿名登入』。請前往 Firebase Console -> Authentication -> Sign-in method 並啟用『匿名 (Anonymous)』。";
-                } else {
-                    statusText.innerText = "身份驗證失敗";
-                    errorMessage.innerText = "錯誤訊息：" + e.message;
-                }
+                errorMessage.innerText = "Auth Error: " + e.message;
             }
         };
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 errorBox.classList.add('hidden');
-                statusText.innerText = "已連線至 Firebase 資料庫";
+                statusText.innerText = "雲端同步已開啟";
                 statusDot.classList.replace('bg-amber-500', 'bg-green-500');
                 statusDot.classList.remove('animate-pulse');
                 startListening();
@@ -291,9 +288,10 @@
         monthFilter.addEventListener('change', updateDisplay);
 
         function startListening() {
-            // 注意：使用絕對路徑以符合安全性規則
+            if (unsubscribe) unsubscribe();
             const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs');
-            onSnapshot(recordsCol, (snapshot) => {
+            
+            unsubscribe = onSnapshot(recordsCol, (snapshot) => {
                 allRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
                                          .sort((a, b) => new Date(b.date + ' ' + b.startTime) - new Date(a.date + ' ' + a.startTime));
                 updateDisplay();
@@ -301,11 +299,7 @@
             }, (err) => {
                 console.error("Firestore Error:", err);
                 errorBox.classList.remove('hidden');
-                if (err.code === 'permission-denied') {
-                    errorMessage.innerHTML = "<strong>權限錯誤 (permission-denied)：</strong> 資料庫拒絕存取。請確認您的 Cloud Firestore 安全規則是否允許讀寫路徑 <code>/artifacts/" + appId + "/public/data/activity_logs</code>。";
-                } else {
-                    errorMessage.innerText = "資料庫連線錯誤：" + err.message;
-                }
+                errorMessage.innerText = "資料庫連線失敗：" + err.message;
             });
         }
 
@@ -321,18 +315,18 @@
             listContainer.innerHTML = records.length ? '' : '<tr><td colspan="6" class="p-10 text-center text-slate-400">目前尚無紀錄</td></tr>';
             records.forEach(record => {
                 const tr = document.createElement('tr');
-                tr.className = "hover:bg-slate-50/50";
+                tr.className = "hover:bg-slate-50/50 transition-colors";
                 tr.innerHTML = `
                     <td class="px-6 py-4">
-                        <div class="font-bold text-slate-800">${record.activityName}</div>
-                        <div class="text-[10px] text-indigo-500 font-bold mt-1">${record.date} ${record.startTime}~${record.endTime}</div>
+                        <div class="font-bold text-slate-800 text-sm">${record.activityName}</div>
+                        <div class="text-[10px] text-indigo-500 font-bold mt-1">${record.date} ${record.startTime || ''}~${record.endTime || ''}</div>
                     </td>
-                    <td class="px-4 py-4 text-center"><span class="text-blue-600">${record.childMale || 0}</span>/<span class="text-blue-400">${record.childFemale || 0}</span></td>
-                    <td class="px-4 py-4 text-center"><span class="text-emerald-600">${record.elderMale || 0}</span>/<span class="text-emerald-400">${record.elderFemale || 0}</span></td>
-                    <td class="px-4 py-4 text-center"><span class="text-purple-600">${record.parentMale || 0}</span>/<span class="text-purple-400">${record.parentFemale || 0}</span></td>
+                    <td class="px-4 py-4 text-center text-xs"><span class="text-blue-600">${record.childMale || 0}</span> / <span class="text-pink-500">${record.childFemale || 0}</span></td>
+                    <td class="px-4 py-4 text-center text-xs"><span class="text-emerald-600">${record.elderMale || 0}</span> / <span class="text-orange-500">${record.elderFemale || 0}</span></td>
+                    <td class="px-4 py-4 text-center text-xs"><span class="text-purple-600">${record.parentMale || 0}</span> / <span class="text-rose-500">${record.parentFemale || 0}</span></td>
                     <td class="px-4 py-4 text-center text-lg font-black text-indigo-700">${record.totalCount || 0}</td>
                     <td class="px-4 py-4 text-center">
-                        <button class="delete-btn p-2 text-slate-300 hover:text-red-500" data-id="${record.id}">
+                        <button onclick="deleteRecord('${record.id}')" class="p-2 text-slate-300 hover:text-red-500 transition-colors">
                              <i data-lucide="trash-2" class="w-4 h-4"></i>
                         </button>
                     </td>
@@ -340,20 +334,20 @@
                 listContainer.appendChild(tr);
             });
             lucide.createIcons();
-            document.querySelectorAll('.delete-btn').forEach(btn => btn.onclick = () => deleteRecord(btn.dataset.id));
         }
 
         function updateOverallSummary() {
             const s = allRecords.reduce((acc, curr) => {
+                const cm = Number(curr.childMale || 0), cf = Number(curr.childFemale || 0);
+                const em = Number(curr.elderMale || 0), ef = Number(curr.elderFemale || 0);
+                const pm = Number(curr.parentMale || 0), pf = Number(curr.parentFemale || 0);
+                
                 acc.t += (curr.totalCount || 0);
-                acc.m += (Number(curr.childMale || 0) + Number(curr.elderMale || 0) + Number(curr.parentMale || 0));
-                acc.f += (Number(curr.childFemale || 0) + Number(curr.elderFemale || 0) + Number(curr.parentFemale || 0));
-                acc.c += (Number(curr.childMale || 0) + Number(curr.childFemale || 0));
-                acc.cm += Number(curr.childMale || 0); acc.cf += Number(curr.childFemale || 0);
-                acc.e += (Number(curr.elderMale || 0) + Number(curr.elderFemale || 0));
-                acc.em += Number(curr.elderMale || 0); acc.ef += Number(curr.elderFemale || 0);
-                acc.p += (Number(curr.parentMale || 0) + Number(curr.parentFemale || 0));
-                acc.pm += Number(curr.parentMale || 0); acc.pf += Number(curr.parentFemale || 0);
+                acc.m += (cm + em + pm);
+                acc.f += (cf + ef + pf);
+                acc.c += (cm + cf); acc.cm += cm; acc.cf += cf;
+                acc.e += (em + ef); acc.em += em; acc.ef += ef;
+                acc.p += (pm + pf); acc.pm += pm; acc.pf += pf;
                 return acc;
             }, { t:0, m:0, f:0, c:0, cm:0, cf:0, e:0, em:0, ef:0, p:0, pm:0, pf:0 });
 
@@ -370,10 +364,14 @@
 
         function updateMonthlySummary(records) {
             const s = records.reduce((acc, curr) => {
+                const cm = Number(curr.childMale || 0), cf = Number(curr.childFemale || 0);
+                const em = Number(curr.elderMale || 0), ef = Number(curr.elderFemale || 0);
+                const pm = Number(curr.parentMale || 0), pf = Number(curr.parentFemale || 0);
+                
                 acc.t += (curr.totalCount || 0);
-                acc.cm += Number(curr.childMale || 0); acc.cf += Number(curr.childFemale || 0);
-                acc.em += Number(curr.elderMale || 0); acc.ef += Number(curr.elderFemale || 0);
-                acc.pm += Number(curr.parentMale || 0); acc.pf += Number(curr.parentFemale || 0);
+                acc.cm += cm; acc.cf += cf;
+                acc.em += em; acc.ef += ef;
+                acc.pm += pm; acc.pf += pf;
                 return acc;
             }, { t: 0, cm: 0, cf: 0, em: 0, ef: 0, pm: 0, pf: 0 });
 
@@ -389,8 +387,9 @@
         form.onsubmit = async (e) => {
             e.preventDefault();
             const btn = document.getElementById('submit-btn');
+            const originalHtml = btn.innerHTML;
             btn.disabled = true;
-            btn.innerHTML = '<i class="loading-spinner" data-lucide="loader-2"></i>';
+            btn.innerHTML = '<i class="loading-spinner w-5 h-5" data-lucide="loader-2"></i>';
             lucide.createIcons();
 
             const cM = Number(document.getElementById('childMale').value);
@@ -417,16 +416,22 @@
                 form.reset();
                 document.getElementById('date').value = new Date().toISOString().split('T')[0];
             } catch (err) { alert("儲存失敗: " + err.message); }
-            finally { btn.disabled = false; btn.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5"></i> 儲存紀錄'; lucide.createIcons(); }
+            finally { 
+                btn.disabled = false; 
+                btn.innerHTML = originalHtml; 
+                lucide.createIcons(); 
+            }
         };
 
-        async function deleteRecord(id) {
+        window.deleteRecord = async (id) => {
             if (confirm("確定要刪除這筆紀錄嗎？")) {
                 try {
                     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activity_logs', id));
                 } catch (err) { alert("刪除失敗：" + err.message); }
             }
-        }
+        };
+
+        lucide.createIcons();
     </script>
 </body>
 </html>
