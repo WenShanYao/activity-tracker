@@ -25,7 +25,7 @@
                     <i data-lucide="clipboard-list" class="w-10 h-10 text-indigo-600"></i>
                     活動數據統計系統
                 </h1>
-                <p class="text-slate-500 mt-2">獨立網頁版 - 支援歷史與月度男女分項加總</p>
+                <p class="text-slate-500 mt-2">雲端同步版 - 支援歷史與月度數據統計</p>
             </div>
             <div class="flex items-center gap-2">
                 <button id="refresh-btn" class="p-2 bg-white rounded-full border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-600" title="手動重新同步">
@@ -42,7 +42,7 @@
         <div id="error-box" class="hidden mb-8 bg-red-50 border border-red-200 p-4 rounded-2xl">
             <h4 class="text-red-800 font-bold flex items-center gap-2 mb-2">
                 <i data-lucide="alert-circle" class="w-5 h-5"></i>
-                連線失敗：設定未完成
+                系統提示
             </h4>
             <p class="text-red-700 text-sm leading-relaxed" id="error-message"></p>
         </div>
@@ -217,23 +217,15 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyBA3OciKb9v1lRKd482bQM8YaZDKQS25Zg",
-            authDomain: "my-activity-tracker-188dd.firebaseapp.com",
-            projectId: "my-activity-tracker-188dd",
-            storageBucket: "my-activity-tracker-188dd.firebasestorage.app",
-            messagingSenderId: "564513727890",
-            appId: "1:564513727890:web:7d8aed5a1f5f0af2a6cd4b",
-            measurementId: "G-BV0RZCMPC4"
-        };
-
+        // Firebase 初始化
+        const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        const appId = "my-activity-tracker-v1"; 
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'activity-system-v1';
 
         const form = document.getElementById('record-form');
         const listContainer = document.getElementById('records-list');
@@ -246,60 +238,53 @@
         let allRecords = [];
         let unsubscribe = null;
 
-        // 初始化日期
+        // 設定預設日期
         const now = new Date();
         document.getElementById('date').value = now.toISOString().split('T')[0];
         document.getElementById('startTime').value = now.toTimeString().slice(0, 5);
         document.getElementById('endTime').value = new Date(now.getTime() + 3600000).toTimeString().slice(0, 5);
         monthFilter.value = now.toISOString().slice(0, 7);
 
-        // 手動同步按鈕
-        document.getElementById('refresh-btn').onclick = () => {
-            const icon = document.querySelector('#refresh-btn i');
-            icon.classList.add('loading-spinner');
-            startListening();
-            setTimeout(() => icon.classList.remove('loading-spinner'), 1000);
-        };
-
-        // 登入處理
-        const login = async () => {
+        // 登入邏輯
+        const initAuth = async () => {
             try {
-                statusText.innerText = "驗證中...";
-                await signInAnonymously(auth);
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
             } catch (e) {
-                errorBox.classList.remove('hidden');
-                statusDot.classList.replace('bg-amber-500', 'bg-red-500');
-                errorMessage.innerText = "Auth Error: " + e.message;
+                console.error("Auth Fail", e);
+                showError("驗證失敗，請檢查網路連線。");
             }
         };
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
-                errorBox.classList.add('hidden');
                 statusText.innerText = "雲端同步已開啟";
-                statusDot.classList.replace('bg-amber-500', 'bg-green-500');
-                statusDot.classList.remove('animate-pulse');
+                statusDot.className = "w-2 h-2 bg-green-500 rounded-full";
+                errorBox.classList.add('hidden');
                 startListening();
             } else {
-                login();
+                initAuth();
             }
         });
 
-        monthFilter.addEventListener('change', updateDisplay);
-
         function startListening() {
+            if (!auth.currentUser) return;
             if (unsubscribe) unsubscribe();
+
+            // 嚴格遵循規則 1：使用指定路徑以確保存儲歷史資料
             const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs');
             
             unsubscribe = onSnapshot(recordsCol, (snapshot) => {
                 allRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-                                         .sort((a, b) => new Date(b.date + ' ' + b.startTime) - new Date(a.date + ' ' + a.startTime));
+                    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
                 updateDisplay();
                 updateOverallSummary();
             }, (err) => {
                 console.error("Firestore Error:", err);
-                errorBox.classList.remove('hidden');
-                errorMessage.innerText = "資料庫連線失敗：" + err.message;
+                showError("資料同步發生錯誤：" + err.message);
             });
         }
 
@@ -319,14 +304,14 @@
                 tr.innerHTML = `
                     <td class="px-6 py-4">
                         <div class="font-bold text-slate-800 text-sm">${record.activityName}</div>
-                        <div class="text-[10px] text-indigo-500 font-bold mt-1">${record.date} ${record.startTime || ''}~${record.endTime || ''}</div>
+                        <div class="text-[10px] text-indigo-500 font-bold mt-1">${record.date} ${record.startTime || ''}</div>
                     </td>
                     <td class="px-4 py-4 text-center text-xs"><span class="text-blue-600">${record.childMale || 0}</span> / <span class="text-pink-500">${record.childFemale || 0}</span></td>
                     <td class="px-4 py-4 text-center text-xs"><span class="text-emerald-600">${record.elderMale || 0}</span> / <span class="text-orange-500">${record.elderFemale || 0}</span></td>
                     <td class="px-4 py-4 text-center text-xs"><span class="text-purple-600">${record.parentMale || 0}</span> / <span class="text-rose-500">${record.parentFemale || 0}</span></td>
                     <td class="px-4 py-4 text-center text-lg font-black text-indigo-700">${record.totalCount || 0}</td>
                     <td class="px-4 py-4 text-center">
-                        <button onclick="deleteRecord('${record.id}')" class="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                        <button onclick="deleteRecord('${record.id}')" class="p-2 text-slate-300 hover:text-red-500">
                              <i data-lucide="trash-2" class="w-4 h-4"></i>
                         </button>
                     </td>
@@ -337,60 +322,49 @@
         }
 
         function updateOverallSummary() {
-            const s = allRecords.reduce((acc, curr) => {
-                const cm = Number(curr.childMale || 0), cf = Number(curr.childFemale || 0);
-                const em = Number(curr.elderMale || 0), ef = Number(curr.elderFemale || 0);
-                const pm = Number(curr.parentMale || 0), pf = Number(curr.parentFemale || 0);
-                
-                acc.t += (curr.totalCount || 0);
-                acc.m += (cm + em + pm);
-                acc.f += (cf + ef + pf);
-                acc.c += (cm + cf); acc.cm += cm; acc.cf += cf;
-                acc.e += (em + ef); acc.em += em; acc.ef += ef;
-                acc.p += (pm + pf); acc.pm += pm; acc.pf += pf;
+            const stats = allRecords.reduce((acc, r) => {
+                acc.total += (r.totalCount || 0);
+                acc.cm += (r.childMale || 0); acc.cf += (r.childFemale || 0);
+                acc.em += (r.elderMale || 0); acc.ef += (r.elderFemale || 0);
+                acc.pm += (r.parentMale || 0); acc.pf += (r.parentFemale || 0);
                 return acc;
-            }, { t:0, m:0, f:0, c:0, cm:0, cf:0, e:0, em:0, ef:0, p:0, pm:0, pf:0 });
+            }, { total:0, cm:0, cf:0, em:0, ef:0, pm:0, pf:0 });
 
-            document.getElementById('stat-total').innerText = s.t;
-            document.getElementById('total-m').innerText = s.m;
-            document.getElementById('total-f').innerText = s.f;
-            document.getElementById('stat-child').innerText = s.c;
-            document.getElementById('total-child-m').innerText = s.cm; document.getElementById('total-child-f').innerText = s.cf;
-            document.getElementById('stat-elder').innerText = s.e;
-            document.getElementById('total-elder-m').innerText = s.em; document.getElementById('total-elder-f').innerText = s.ef;
-            document.getElementById('stat-parent').innerText = s.p;
-            document.getElementById('total-parent-m').innerText = s.pm; document.getElementById('total-parent-f').innerText = s.pf;
+            document.getElementById('stat-total').innerText = stats.total;
+            document.getElementById('total-m').innerText = stats.cm + stats.em + stats.pm;
+            document.getElementById('total-f').innerText = stats.cf + stats.ef + stats.pf;
+            document.getElementById('stat-child').innerText = stats.cm + stats.cf;
+            document.getElementById('total-child-m').innerText = stats.cm; document.getElementById('total-child-f').innerText = stats.cf;
+            document.getElementById('stat-elder').innerText = stats.em + stats.ef;
+            document.getElementById('total-elder-m').innerText = stats.em; document.getElementById('total-elder-f').innerText = stats.ef;
+            document.getElementById('stat-parent').innerText = stats.pm + stats.pf;
+            document.getElementById('total-parent-m').innerText = stats.pm; document.getElementById('total-parent-f').innerText = stats.pf;
         }
 
         function updateMonthlySummary(records) {
-            const s = records.reduce((acc, curr) => {
-                const cm = Number(curr.childMale || 0), cf = Number(curr.childFemale || 0);
-                const em = Number(curr.elderMale || 0), ef = Number(curr.elderFemale || 0);
-                const pm = Number(curr.parentMale || 0), pf = Number(curr.parentFemale || 0);
-                
-                acc.t += (curr.totalCount || 0);
-                acc.cm += cm; acc.cf += cf;
-                acc.em += em; acc.ef += ef;
-                acc.pm += pm; acc.pf += pf;
+            const stats = records.reduce((acc, r) => {
+                acc.total += (r.totalCount || 0);
+                acc.cm += (r.childMale || 0); acc.cf += (r.childFemale || 0);
+                acc.em += (r.elderMale || 0); acc.ef += (r.elderFemale || 0);
+                acc.pm += (r.parentMale || 0); acc.pf += (r.parentFemale || 0);
                 return acc;
-            }, { t: 0, cm: 0, cf: 0, em: 0, ef: 0, pm: 0, pf: 0 });
+            }, { total:0, cm:0, cf:0, em:0, ef:0, pm:0, pf:0 });
 
-            document.getElementById('month-stat-total').innerText = s.t;
-            document.getElementById('month-stat-child').innerText = s.cm + s.cf;
-            document.getElementById('m-child-m').innerText = s.cm; document.getElementById('m-child-f').innerText = s.cf;
-            document.getElementById('month-stat-elder').innerText = s.em + s.ef;
-            document.getElementById('m-elder-m').innerText = s.em; document.getElementById('m-elder-f').innerText = s.ef;
-            document.getElementById('month-stat-parent').innerText = s.pm + s.pf;
-            document.getElementById('m-parent-m').innerText = s.pm; document.getElementById('m-parent-f').innerText = s.pf;
+            document.getElementById('month-stat-total').innerText = stats.total;
+            document.getElementById('month-stat-child').innerText = stats.cm + stats.cf;
+            document.getElementById('m-child-m').innerText = stats.cm; document.getElementById('m-child-f').innerText = stats.cf;
+            document.getElementById('month-stat-elder').innerText = stats.em + stats.ef;
+            document.getElementById('m-elder-m').innerText = stats.em; document.getElementById('m-elder-f').innerText = stats.ef;
+            document.getElementById('month-stat-parent').innerText = stats.pm + stats.pf;
+            document.getElementById('m-parent-m').innerText = stats.pm; document.getElementById('m-parent-f').innerText = stats.pf;
         }
 
         form.onsubmit = async (e) => {
             e.preventDefault();
-            const btn = document.getElementById('submit-btn');
-            const originalHtml = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<i class="loading-spinner w-5 h-5" data-lucide="loader-2"></i>';
-            lucide.createIcons();
+            if (!auth.currentUser) return;
+
+            const submitBtn = document.getElementById('submit-btn');
+            submitBtn.disabled = true;
 
             const cM = Number(document.getElementById('childMale').value);
             const cF = Number(document.getElementById('childFemale').value);
@@ -399,7 +373,7 @@
             const pM = Number(document.getElementById('parentMale').value);
             const pF = Number(document.getElementById('parentFemale').value);
 
-            const data = {
+            const record = {
                 activityName: document.getElementById('activityName').value,
                 date: document.getElementById('date').value,
                 startTime: document.getElementById('startTime').value,
@@ -412,25 +386,35 @@
             };
 
             try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs'), data);
+                const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs');
+                await addDoc(recordsCol, record);
                 form.reset();
                 document.getElementById('date').value = new Date().toISOString().split('T')[0];
-            } catch (err) { alert("儲存失敗: " + err.message); }
-            finally { 
-                btn.disabled = false; 
-                btn.innerHTML = originalHtml; 
-                lucide.createIcons(); 
+            } catch (err) {
+                alert("儲存失敗：" + err.message);
+            } finally {
+                submitBtn.disabled = false;
             }
         };
 
         window.deleteRecord = async (id) => {
-            if (confirm("確定要刪除這筆紀錄嗎？")) {
+            if (confirm("確定要刪除此筆紀錄？")) {
                 try {
-                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activity_logs', id));
-                } catch (err) { alert("刪除失敗：" + err.message); }
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'activity_logs', id);
+                    await deleteDoc(docRef);
+                } catch (err) {
+                    alert("刪除失敗");
+                }
             }
         };
 
+        function showError(msg) {
+            errorBox.classList.remove('hidden');
+            errorMessage.innerText = msg;
+            statusDot.className = "w-2 h-2 bg-red-500 rounded-full";
+        }
+
+        monthFilter.onchange = updateDisplay;
         lucide.createIcons();
     </script>
 </body>
