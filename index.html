@@ -1,439 +1,437 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>活動參與人數紀錄系統</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; }
-        .loading-spinner { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>活動參與人數紀錄系統</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .loading-spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen p-4 md:p-8">
 
-    <div id="app" class="max-w-7xl mx-auto">
-        <!-- Header -->
-        <header class="mb-8 border-b border-slate-200 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
-            <div>
-                <h1 class="text-3xl font-extrabold text-slate-800 flex items-center gap-3">
-                    <i data-lucide="clipboard-list" class="w-10 h-10 text-indigo-600"></i>
-                    活動數據統計系統
-                </h1>
-                <p class="text-slate-500 mt-2">獨立網頁版 - 支援歷史與月度男女分項加總</p>
-            </div>
-            <div class="flex items-center gap-2">
-                <button id="refresh-btn" class="p-2 bg-white rounded-full border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-600" title="手動重新同步">
-                    <i data-lucide="refresh-cw" class="w-5 h-5"></i>
-                </button>
-                <div id="auth-status" class="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
-                    <div class="w-2 h-2 bg-amber-500 rounded-full animate-pulse" id="status-dot"></div>
-                    <span class="text-xs font-semibold text-slate-600" id="status-text">正在連接資料庫...</span>
-                </div>
-            </div>
-        </header>
+    <div id="app" class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <header class="mb-8 border-b border-slate-200 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-extrabold text-slate-800 flex items-center gap-3">
+                    <i data-lucide="clipboard-list" class="w-10 h-10 text-indigo-600"></i>
+                    活動數據統計系統
+                </h1>
+                <p class="text-slate-500 mt-2">獨立網頁版 - 支援歷史與月度男女分項加總</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="refresh-btn" class="p-2 bg-white rounded-full border border-slate-200 shadow-sm hover:bg-slate-50 text-slate-600" title="手動重新同步">
+                    <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                </button>
+                <div id="auth-status" class="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+                    <div class="w-2 h-2 bg-amber-500 rounded-full animate-pulse" id="status-dot"></div>
+                    <span class="text-xs font-semibold text-slate-600" id="status-text">正在連接資料庫...</span>
+                </div>
+            </div>
+        </header>
 
-        <!-- 錯誤診斷提示框 -->
-        <div id="error-box" class="hidden mb-8 bg-red-50 border border-red-200 p-4 rounded-2xl">
-            <h4 class="text-red-800 font-bold flex items-center gap-2 mb-2">
-                <i data-lucide="alert-circle" class="w-5 h-5"></i>
-                連線失敗：設定未完成
-            </h4>
-            <p class="text-red-700 text-sm leading-relaxed" id="error-message"></p>
-        </div>
+        <!-- 錯誤診斷提示框 -->
+        <div id="error-box" class="hidden mb-8 bg-red-50 border border-red-200 p-4 rounded-2xl">
+            <h4 class="text-red-800 font-bold flex items-center gap-2 mb-2">
+                <i data-lucide="alert-circle" class="w-5 h-5"></i>
+                連線失敗：設定未完成
+            </h4>
+            <p class="text-red-700 text-sm leading-relaxed" id="error-message"></p>
+        </div>
 
-        <!-- Dashboard Statistics -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" id="stats-dashboard">
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white">
-                <p class="text-xs font-bold text-indigo-500 uppercase tracking-wider">歷史累計總人數</p>
-                <h3 class="text-3xl font-black text-indigo-700 mt-1" id="stat-total">0</h3>
-                <div class="mt-2 pt-2 border-t border-indigo-100/50 flex gap-4 text-xs font-bold">
-                    <span class="text-blue-600">男: <b id="total-m">0</b></span>
-                    <span class="text-pink-500">女: <b id="total-f">0</b></span>
-                </div>
-            </div>
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                <p class="text-xs font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1">
-                    <i data-lucide="baby" class="w-3 h-3"></i> 歷史兒少累計
-                </p>
-                <h3 class="text-2xl font-bold text-slate-700 mt-1" id="stat-child">0</h3>
-                <div class="mt-2 pt-2 border-t border-slate-50 flex gap-3 text-[10px] font-bold">
-                    <span class="text-blue-600">男: <b id="total-child-m">0</b></span>
-                    <span class="text-pink-500">女: <b id="total-child-f">0</b></span>
-                </div>
-            </div>
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                <p class="text-xs font-bold text-emerald-600 uppercase tracking-wider flex items-center gap-1">
-                    <i data-lucide="user-round" class="w-3 h-3"></i> 歷史長輩累計
-                </p>
-                <h3 class="text-2xl font-bold text-slate-700 mt-1" id="stat-elder">0</h3>
-                <div class="mt-2 pt-2 border-t border-slate-50 flex gap-3 text-[10px] font-bold">
-                    <span class="text-emerald-600">男: <b id="total-elder-m">0</b></span>
-                    <span class="text-orange-500">女: <b id="total-elder-f">0</b></span>
-                </div>
-            </div>
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                <p class="text-xs font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1">
-                    <i data-lucide="heart" class="w-3 h-3"></i> 歷史家長累計
-                </p>
-                <h3 class="text-2xl font-bold text-slate-700 mt-1" id="stat-parent">0</h3>
-                <div class="mt-2 pt-2 border-t border-slate-50 flex gap-3 text-[10px] font-bold">
-                    <span class="text-purple-600">男: <b id="total-parent-m">0</b></span>
-                    <span class="text-rose-500">女: <b id="total-parent-f">0</b></span>
-                </div>
-            </div>
-        </div>
+        <!-- Dashboard Statistics -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" id="stats-dashboard">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white">
+                <p class="text-xs font-bold text-indigo-500 uppercase tracking-wider">歷史累計總人數</p>
+                <h3 class="text-3xl font-black text-indigo-700 mt-1" id="stat-total">0</h3>
+                <div class="mt-2 pt-2 border-t border-indigo-100/50 flex gap-4 text-xs font-bold">
+                    <span class="text-blue-600">男: <b id="total-m">0</b></span>
+                    <span class="text-pink-500">女: <b id="total-f">0</b></span>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                <p class="text-xs font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1">
+                    <i data-lucide="baby" class="w-3 h-3"></i> 歷史兒少累計
+                </p>
+                <h3 class="text-2xl font-bold text-slate-700 mt-1" id="stat-child">0</h3>
+                <div class="mt-2 pt-2 border-t border-slate-50 flex gap-3 text-[10px] font-bold">
+                    <span class="text-blue-600">男: <b id="total-child-m">0</b></span>
+                    <span class="text-pink-500">女: <b id="total-child-f">0</b></span>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                <p class="text-xs font-bold text-emerald-600 uppercase tracking-wider flex items-center gap-1">
+                    <i data-lucide="user-round" class="w-3 h-3"></i> 歷史長輩累計
+                </p>
+                <h3 class="text-2xl font-bold text-slate-700 mt-1" id="stat-elder">0</h3>
+                <div class="mt-2 pt-2 border-t border-slate-50 flex gap-3 text-[10px] font-bold">
+                    <span class="text-emerald-600">男: <b id="total-elder-m">0</b></span>
+                    <span class="text-orange-500">女: <b id="total-elder-f">0</b></span>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                <p class="text-xs font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1">
+                    <i data-lucide="heart" class="w-3 h-3"></i> 歷史家長累計
+                </p>
+                <h3 class="text-2xl font-bold text-slate-700 mt-1" id="stat-parent">0</h3>
+                <div class="mt-2 pt-2 border-t border-slate-50 flex gap-3 text-[10px] font-bold">
+                    <span class="text-purple-600">男: <b id="total-parent-m">0</b></span>
+                    <span class="text-rose-500">女: <b id="total-parent-f">0</b></span>
+                </div>
+            </div>
+        </div>
 
-        <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
-            <!-- Form Section -->
-            <section class="xl:col-span-4">
-                <div class="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 sticky top-8">
-                    <h2 class="text-xl font-bold mb-6 flex items-center gap-2 text-slate-800">
-                        <i data-lucide="user-plus" class="w-6 h-6 text-indigo-600"></i>
-                        新增活動紀錄
-                    </h2>
-                    <form id="record-form" class="space-y-4">
-                        <div>
-                            <label class="text-sm font-bold text-slate-600 mb-1 block">活動名稱 *</label>
-                            <input required type="text" id="activityName" class="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="例如：社區共餐">
-                        </div>
-                        
-                        <div class="space-y-3">
-                            <div>
-                                <label class="text-xs font-bold text-slate-400 mb-1 block">活動日期</label>
-                                <input type="date" id="date" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
-                            </div>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label class="text-xs font-bold text-slate-400 mb-1 block">開始時間</label>
-                                    <input type="time" id="startTime" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
-                                </div>
-                                <div>
-                                    <label class="text-xs font-bold text-slate-400 mb-1 block">結束時間</label>
-                                    <input type="time" id="endTime" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
-                                </div>
-                            </div>
-                        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
+            <!-- Form Section -->
+            <section class="xl:col-span-4">
+                <div class="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 sticky top-8">
+                    <h2 class="text-xl font-bold mb-6 flex items-center gap-2 text-slate-800">
+                        <i data-lucide="user-plus" class="w-6 h-6 text-indigo-600"></i>
+                        新增活動紀錄
+                    </h2>
+                    <form id="record-form" class="space-y-4">
+                        <div>
+                            <label class="text-sm font-bold text-slate-600 mb-1 block">活動名稱 *</label>
+                            <input required type="text" id="activityName" class="w-full px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="例如：社區共餐">
+                        </div>
+                        
+                        <div class="space-y-3">
+                            <div>
+                                <label class="text-xs font-bold text-slate-400 mb-1 block">活動日期</label>
+                                <input type="date" id="date" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="text-xs font-bold text-slate-400 mb-1 block">開始時間</label>
+                                    <input type="time" id="startTime" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-slate-400 mb-1 block">結束時間</label>
+                                    <input type="time" id="endTime" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
+                                </div>
+                            </div>
+                        </div>
 
-                        <div class="space-y-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                            <div class="grid grid-cols-2 gap-4">
-                                <label class="col-span-2 text-xs font-bold text-blue-500 flex items-center gap-1"><i data-lucide="baby" class="w-3 h-3"></i> 兒少人數 (男/女)</label>
-                                <input type="number" id="childMale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
-                                <input type="number" id="childFemale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
-                            </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <label class="col-span-2 text-xs font-bold text-emerald-500 flex items-center gap-1"><i data-lucide="user-round" class="w-3 h-3"></i> 長輩人數 (男/女)</label>
-                                <input type="number" id="elderMale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
-                                <input type="number" id="elderFemale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
-                            </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <label class="col-span-2 text-xs font-bold text-purple-500 flex items-center gap-1"><i data-lucide="heart" class="w-3 h-3"></i> 家長人數 (男/女)</label>
-                                <input type="number" id="parentMale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
-                                <input type="number" id="parentFemale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
-                            </div>
-                        </div>
+                        <div class="space-y-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div class="grid grid-cols-2 gap-4">
+                                <label class="col-span-2 text-xs font-bold text-blue-500 flex items-center gap-1"><i data-lucide="baby" class="w-3 h-3"></i> 兒少人數 (男/女)</label>
+                                <input type="number" id="childMale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                                <input type="number" id="childFemale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <label class="col-span-2 text-xs font-bold text-emerald-500 flex items-center gap-1"><i data-lucide="user-round" class="w-3 h-3"></i> 長輩人數 (男/女)</label>
+                                <input type="number" id="elderMale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                                <input type="number" id="elderFemale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <label class="col-span-2 text-xs font-bold text-purple-500 flex items-center gap-1"><i data-lucide="heart" class="w-3 h-3"></i> 家長人數 (男/女)</label>
+                                <input type="number" id="parentMale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                                <input type="number" id="parentFemale" min="0" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                            </div>
+                        </div>
 
-                        <button type="submit" id="submit-btn" class="w-full py-4 rounded-2xl font-black text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition-all shadow-lg flex items-center justify-center gap-2">
-                            <i data-lucide="check-circle-2" class="w-5 h-5"></i>
-                            儲存紀錄
-                        </button>
-                    </form>
-                </div>
-            </section>
+                        <button type="submit" id="submit-btn" class="w-full py-4 rounded-2xl font-black text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition-all shadow-lg flex items-center justify-center gap-2">
+                            <i data-lucide="check-circle-2" class="w-5 h-5"></i>
+                            儲存紀錄
+                        </button>
+                    </form>
+                </div>
+            </section>
 
-            <!-- List Section -->
-            <section class="xl:col-span-8 space-y-6">
-                <div class="bg-white p-6 rounded-3xl shadow-xl border border-slate-100">
-                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                        <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
-                            <i data-lucide="calendar" class="w-6 h-6 text-indigo-600"></i>
-                            本月分項數據加總
-                        </h2>
-                        <input type="month" id="month-filter" class="px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-bold text-indigo-600">
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="monthly-summary">
-                        <div class="p-4 bg-indigo-600 rounded-2xl border border-indigo-600 text-white shadow-lg shadow-indigo-200 text-center">
-                            <p class="text-[10px] font-bold opacity-80 uppercase tracking-widest">本月總人數</p>
-                            <p class="text-3xl font-black mt-1" id="month-stat-total">0</p>
-                        </div>
-                        <div class="p-4 bg-white rounded-2xl border border-blue-100 text-center">
-                            <p class="text-[10px] font-bold text-blue-500 uppercase">兒少月統計</p>
-                            <p class="text-2xl font-black text-slate-800 mt-1" id="month-stat-child">0</p>
-                            <div class="mt-2 pt-2 border-t border-blue-50 flex justify-center gap-3 text-xs font-bold">
-                                <span class="text-blue-600">男:<b id="m-child-m">0</b></span>
-                                <span class="text-pink-500">女:<b id="m-child-f">0</b></span>
-                            </div>
-                        </div>
-                        <div class="p-4 bg-white rounded-2xl border border-emerald-100 text-center">
-                            <p class="text-[10px] font-bold text-emerald-600 uppercase">長輩月統計</p>
-                            <p class="text-2xl font-black text-slate-800 mt-1" id="month-stat-elder">0</p>
-                            <div class="mt-2 pt-2 border-t border-emerald-50 flex justify-center gap-3 text-xs font-bold">
-                                <span class="text-emerald-600">男:<b id="m-elder-m">0</b></span>
-                                <span class="text-orange-500">女:<b id="m-elder-f">0</b></span>
-                            </div>
-                        </div>
-                        <div class="p-4 bg-white rounded-2xl border border-purple-100 text-center">
-                            <p class="text-[10px] font-bold text-purple-600 uppercase">家長月統計</p>
-                            <p class="text-2xl font-black text-slate-800 mt-1" id="month-stat-parent">0</p>
-                            <div class="mt-2 pt-2 border-t border-purple-50 flex justify-center gap-3 text-xs font-bold">
-                                <span class="text-purple-600">男:<b id="m-parent-m">0</b></span>
-                                <span class="text-rose-500">女:<b id="m-parent-f">0</b></span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <!-- List Section -->
+            <section class="xl:col-span-8 space-y-6">
+                <div class="bg-white p-6 rounded-3xl shadow-xl border border-slate-100">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                        <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                            <i data-lucide="calendar" class="w-6 h-6 text-indigo-600"></i>
+                            本月分項數據加總
+                        </h2>
+                        <input type="month" id="month-filter" class="px-4 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-bold text-indigo-600">
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="monthly-summary">
+                        <div class="p-4 bg-indigo-600 rounded-2xl border border-indigo-600 text-white shadow-lg shadow-indigo-200 text-center">
+                            <p class="text-[10px] font-bold opacity-80 uppercase tracking-widest">本月總人數</p>
+                            <p class="text-3xl font-black mt-1" id="month-stat-total">0</p>
+                        </div>
+                        <div class="p-4 bg-white rounded-2xl border border-blue-100 text-center">
+                            <p class="text-[10px] font-bold text-blue-500 uppercase">兒少月統計</p>
+                            <p class="text-2xl font-black text-slate-800 mt-1" id="month-stat-child">0</p>
+                            <div class="mt-2 pt-2 border-t border-blue-50 flex justify-center gap-3 text-xs font-bold">
+                                <span class="text-blue-600">男:<b id="m-child-m">0</b></span>
+                                <span class="text-pink-500">女:<b id="m-child-f">0</b></span>
+                            </div>
+                        </div>
+                        <div class="p-4 bg-white rounded-2xl border border-emerald-100 text-center">
+                            <p class="text-[10px] font-bold text-emerald-600 uppercase">長輩月統計</p>
+                            <p class="text-2xl font-black text-slate-800 mt-1" id="month-stat-elder">0</p>
+                            <div class="mt-2 pt-2 border-t border-emerald-50 flex justify-center gap-3 text-xs font-bold">
+                                <span class="text-emerald-600">男:<b id="m-elder-m">0</b></span>
+                                <span class="text-orange-500">女:<b id="m-elder-f">0</b></span>
+                            </div>
+                        </div>
+                        <div class="p-4 bg-white rounded-2xl border border-purple-100 text-center">
+                            <p class="text-[10px] font-bold text-purple-600 uppercase">家長月統計</p>
+                            <p class="text-2xl font-black text-slate-800 mt-1" id="month-stat-parent">0</p>
+                            <div class="mt-2 pt-2 border-t border-purple-50 flex justify-center gap-3 text-xs font-bold">
+                                <span class="text-purple-600">男:<b id="m-parent-m">0</b></span>
+                                <span class="text-rose-500">女:<b id="m-parent-f">0</b></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
-                <!-- History Table -->
-                <div class="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
-                    <div class="p-6 border-b border-slate-50 flex justify-between items-center">
-                        <h2 class="text-xl font-bold text-slate-800">歷史紀錄清單</h2>
-                        <span class="bg-slate-100 text-slate-500 px-3 py-1 rounded-full text-xs font-bold" id="record-count">0 筆資料</span>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left">
-                            <thead class="bg-slate-50 text-slate-400 text-[10px] uppercase font-black tracking-widest border-b border-slate-100">
-                                <tr>
-                                    <th class="px-6 py-4">活動名稱/時間</th>
-                                    <th class="px-4 py-4 text-center">兒少(男/女)</th>
-                                    <th class="px-4 py-4 text-center">長輩(男/女)</th>
-                                    <th class="px-4 py-4 text-center">家長(男/女)</th>
-                                    <th class="px-4 py-4 text-center text-indigo-600">總計</th>
-                                    <th class="px-4 py-4 text-center"></th>
-                                </tr>
-                            </thead>
-                            <tbody id="records-list" class="divide-y divide-slate-50"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-        </div>
-    </div>
+                <!-- History Table -->
+                <div class="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
+                    <div class="p-6 border-b border-slate-50 flex justify-between items-center">
+                        <h2 class="text-xl font-bold text-slate-800">歷史紀錄清單</h2>
+                        <span class="bg-slate-100 text-slate-500 px-3 py-1 rounded-full text-xs font-bold" id="record-count">0 筆資料</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-slate-50 text-slate-400 text-[10px] uppercase font-black tracking-widest border-b border-slate-100">
+                                <tr>
+                                    <th class="px-6 py-4">活動名稱/時間</th>
+                                    <th class="px-4 py-4 text-center">兒少(男/女)</th>
+                                    <th class="px-4 py-4 text-center">長輩(男/女)</th>
+                                    <th class="px-4 py-4 text-center">家長(男/女)</th>
+                                    <th class="px-4 py-4 text-center text-indigo-600">總計</th>
+                                    <th class="px-4 py-4 text-center"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="records-list" class="divide-y divide-slate-50"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
 
-    <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyBA3OciKb9v1lRKd482bQM8YaZDKQS25Zg",
-            authDomain: "my-activity-tracker-188dd.firebaseapp.com",
-            projectId: "my-activity-tracker-188dd",
-            storageBucket: "my-activity-tracker-188dd.firebasestorage.app",
-            messagingSenderId: "564513727890",
-            appId: "1:564513727890:web:7d8aed5a1f5f0af2a6cd4b",
-            measurementId: "G-BV0RZCMPC4"
-        };
+        const firebaseConfig = {
+            apiKey: "AIzaSyBA3OciKb9v1lRKd482bQM8YaZDKQS25Zg",
+            authDomain: "my-activity-tracker-188dd.firebaseapp.com",
+            projectId: "my-activity-tracker-188dd",
+            storageBucket: "my-activity-tracker-188dd.firebasestorage.app",
+            messagingSenderId: "564513727890",
+            appId: "1:564513727890:web:7d8aed5a1f5f0af2a6cd4b",
+            measurementId: "G-BV0RZCMPC4"
+        };
 
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-        const appId = "my-activity-tracker-v1"; 
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = "my-activity-tracker-v1"; 
 
-        const form = document.getElementById('record-form');
-        const listContainer = document.getElementById('records-list');
-        const statusText = document.getElementById('status-text');
-        const statusDot = document.getElementById('status-dot');
-        const monthFilter = document.getElementById('month-filter');
-        const errorBox = document.getElementById('error-box');
-        const errorMessage = document.getElementById('error-message');
+        const form = document.getElementById('record-form');
+        const listContainer = document.getElementById('records-list');
+        const statusText = document.getElementById('status-text');
+        const statusDot = document.getElementById('status-dot');
+        const monthFilter = document.getElementById('month-filter');
+        const errorBox = document.getElementById('error-box');
+        const errorMessage = document.getElementById('error-message');
 
-        let allRecords = [];
-        let unsubscribe = null;
+        let allRecords = [];
+        let unsubscribe = null;
 
-        // 初始化日期
-        const now = new Date();
-        document.getElementById('date').value = now.toISOString().split('T')[0];
-        document.getElementById('startTime').value = now.toTimeString().slice(0, 5);
-        document.getElementById('endTime').value = new Date(now.getTime() + 3600000).toTimeString().slice(0, 5);
-        monthFilter.value = now.toISOString().slice(0, 7);
+        // 初始化日期
+        const now = new Date();
+        document.getElementById('date').value = now.toISOString().split('T')[0];
+        document.getElementById('startTime').value = now.toTimeString().slice(0, 5);
+        document.getElementById('endTime').value = new Date(now.getTime() + 3600000).toTimeString().slice(0, 5);
+        monthFilter.value = now.toISOString().slice(0, 7);
 
-        // 手動同步按鈕
-        document.getElementById('refresh-btn').onclick = () => {
-            const icon = document.querySelector('#refresh-btn i');
-            icon.classList.add('loading-spinner');
-            startListening();
-            setTimeout(() => icon.classList.remove('loading-spinner'), 1000);
-        };
+        // 手動同步按鈕
+        document.getElementById('refresh-btn').onclick = () => {
+            const icon = document.querySelector('#refresh-btn i');
+            icon.classList.add('loading-spinner');
+            startListening();
+            setTimeout(() => icon.classList.remove('loading-spinner'), 1000);
+        };
 
-        // 登入處理
-        const login = async () => {
-            try {
-                statusText.innerText = "驗證中...";
-                await signInAnonymously(auth);
-            } catch (e) {
-                errorBox.classList.remove('hidden');
-                statusDot.classList.replace('bg-amber-500', 'bg-red-500');
-                errorMessage.innerText = "Auth Error: " + e.message;
-            }
-        };
+        // 登入處理
+        const login = async () => {
+            try {
+                statusText.innerText = "驗證中...";
+                await signInAnonymously(auth);
+            } catch (e) {
+                errorBox.classList.remove('hidden');
+                statusDot.classList.replace('bg-amber-500', 'bg-red-500');
+                errorMessage.innerText = "Auth Error: " + e.message;
+            }
+        };
 
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                errorBox.classList.add('hidden');
-                statusText.innerText = "雲端同步已開啟";
-                statusDot.classList.replace('bg-amber-500', 'bg-green-500');
-                statusDot.classList.remove('animate-pulse');
-                startListening();
-            } else {
-                login();
-            }
-        });
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                errorBox.classList.add('hidden');
+                statusText.innerText = "雲端同步已開啟";
+                statusDot.classList.replace('bg-amber-500', 'bg-green-500');
+                statusDot.classList.remove('animate-pulse');
+                startListening();
+            } else {
+                login();
+            }
+        });
 
-        monthFilter.addEventListener('change', updateDisplay);
+        monthFilter.addEventListener('change', updateDisplay);
 
-        function startListening() {
-            if (unsubscribe) unsubscribe();
-            const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs');
-            
-            unsubscribe = onSnapshot(recordsCol, (snapshot) => {
-                allRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-                                         .sort((a, b) => new Date(b.date + ' ' + b.startTime) - new Date(a.date + ' ' + a.startTime));
-                updateDisplay();
-                updateOverallSummary();
-            }, (err) => {
-                console.error("Firestore Error:", err);
-                errorBox.classList.remove('hidden');
-                errorMessage.innerText = "資料庫連線失敗：" + err.message;
-            });
-        }
+        function startListening() {
+            if (unsubscribe) unsubscribe();
+            const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs');
+            
+            unsubscribe = onSnapshot(recordsCol, (snapshot) => {
+                allRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                                         .sort((a, b) => new Date(b.date + ' ' + b.startTime) - new Date(a.date + ' ' + a.startTime));
+                updateDisplay();
+                updateOverallSummary();
+            }, (err) => {
+                console.error("Firestore Error:", err);
+                errorBox.classList.remove('hidden');
+                errorMessage.innerText = "資料庫連線失敗：" + err.message;
+            });
+        }
 
-        function updateDisplay() {
-            const selectedMonth = monthFilter.value;
-            const filtered = allRecords.filter(r => r.date && r.date.startsWith(selectedMonth));
-            renderRecords(filtered);
-            updateMonthlySummary(filtered);
-            document.getElementById('record-count').innerText = `${filtered.length} 筆資料`;
-        }
+        function updateDisplay() {
+            const selectedMonth = monthFilter.value;
+            const filtered = allRecords.filter(r => r.date && r.date.startsWith(selectedMonth));
+            renderRecords(filtered);
+            updateMonthlySummary(filtered);
+            document.getElementById('record-count').innerText = `${filtered.length} 筆資料`;
+        }
 
-        function renderRecords(records) {
-            listContainer.innerHTML = records.length ? '' : '<tr><td colspan="6" class="p-10 text-center text-slate-400">目前尚無紀錄</td></tr>';
-            records.forEach(record => {
-                const tr = document.createElement('tr');
-                tr.className = "hover:bg-slate-50/50 transition-colors";
-                tr.innerHTML = `
-                    <td class="px-6 py-4">
-                        <div class="font-bold text-slate-800 text-sm">${record.activityName}</div>
-                        <div class="text-[10px] text-indigo-500 font-bold mt-1">${record.date} ${record.startTime || ''}~${record.endTime || ''}</div>
-                    </td>
-                    <td class="px-4 py-4 text-center text-xs"><span class="text-blue-600">${record.childMale || 0}</span> / <span class="text-pink-500">${record.childFemale || 0}</span></td>
-                    <td class="px-4 py-4 text-center text-xs"><span class="text-emerald-600">${record.elderMale || 0}</span> / <span class="text-orange-500">${record.elderFemale || 0}</span></td>
-                    <td class="px-4 py-4 text-center text-xs"><span class="text-purple-600">${record.parentMale || 0}</span> / <span class="text-rose-500">${record.parentFemale || 0}</span></td>
-                    <td class="px-4 py-4 text-center text-lg font-black text-indigo-700">${record.totalCount || 0}</td>
-                    <td class="px-4 py-4 text-center">
-                        <button onclick="deleteRecord('${record.id}')" class="p-2 text-slate-300 hover:text-red-500 transition-colors">
-                             <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        </button>
-                    </td>
-                `;
-                listContainer.appendChild(tr);
-            });
-            lucide.createIcons();
-        }
+        function renderRecords(records) {
+            listContainer.innerHTML = records.length ? '' : '<tr><td colspan="6" class="p-10 text-center text-slate-400">目前尚無紀錄</td></tr>';
+            records.forEach(record => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50/50 transition-colors";
+                tr.innerHTML = `
+                    <td class="px-6 py-4">
+                        <div class="font-bold text-slate-800 text-sm">${record.activityName}</div>
+                        <div class="text-[10px] text-indigo-500 font-bold mt-1">${record.date} ${record.startTime || ''}~${record.endTime || ''}</div>
+                    </td>
+                    <td class="px-4 py-4 text-center text-xs"><span class="text-blue-600">${record.childMale || 0}</span> / <span class="text-pink-500">${record.childFemale || 0}</span></td>
+                    <td class="px-4 py-4 text-center text-xs"><span class="text-emerald-600">${record.elderMale || 0}</span> / <span class="text-orange-500">${record.elderFemale || 0}</span></td>
+                    <td class="px-4 py-4 text-center text-xs"><span class="text-purple-600">${record.parentMale || 0}</span> / <span class="text-rose-500">${record.parentFemale || 0}</span></td>
+                    <td class="px-4 py-4 text-center text-lg font-black text-indigo-700">${record.totalCount || 0}</td>
+                    <td class="px-4 py-4 text-center">
+                        <button onclick="deleteRecord('${record.id}')" class="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                             <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </td>
+                `;
+                listContainer.appendChild(tr);
+            });
+            lucide.createIcons();
+        }
 
-        function updateOverallSummary() {
-            const s = allRecords.reduce((acc, curr) => {
-                const cm = Number(curr.childMale || 0), cf = Number(curr.childFemale || 0);
-                const em = Number(curr.elderMale || 0), ef = Number(curr.elderFemale || 0);
-                const pm = Number(curr.parentMale || 0), pf = Number(curr.parentFemale || 0);
-                
-                acc.t += (curr.totalCount || 0);
-                acc.m += (cm + em + pm);
-                acc.f += (cf + ef + pf);
-                acc.c += (cm + cf); acc.cm += cm; acc.cf += cf;
-                acc.e += (em + ef); acc.em += em; acc.ef += ef;
-                acc.p += (pm + pf); acc.pm += pm; acc.pf += pf;
-                return acc;
-            }, { t:0, m:0, f:0, c:0, cm:0, cf:0, e:0, em:0, ef:0, p:0, pm:0, pf:0 });
+        function updateOverallSummary() {
+            const s = allRecords.reduce((acc, curr) => {
+                const cm = Number(curr.childMale || 0), cf = Number(curr.childFemale || 0);
+                const em = Number(curr.elderMale || 0), ef = Number(curr.elderFemale || 0);
+                const pm = Number(curr.parentMale || 0), pf = Number(curr.parentFemale || 0);
+                
+                acc.t += (curr.totalCount || 0);
+                acc.m += (cm + em + pm);
+                acc.f += (cf + ef + pf);
+                acc.c += (cm + cf); acc.cm += cm; acc.cf += cf;
+                acc.e += (em + ef); acc.em += em; acc.ef += ef;
+                acc.p += (pm + pf); acc.pm += pm; acc.pf += pf;
+                return acc;
+            }, { t:0, m:0, f:0, c:0, cm:0, cf:0, e:0, em:0, ef:0, p:0, pm:0, pf:0 });
 
-            document.getElementById('stat-total').innerText = s.t;
-            document.getElementById('total-m').innerText = s.m;
-            document.getElementById('total-f').innerText = s.f;
-            document.getElementById('stat-child').innerText = s.c;
-            document.getElementById('total-child-m').innerText = s.cm; document.getElementById('total-child-f').innerText = s.cf;
-            document.getElementById('stat-elder').innerText = s.e;
-            document.getElementById('total-elder-m').innerText = s.em; document.getElementById('total-elder-f').innerText = s.ef;
-            document.getElementById('stat-parent').innerText = s.p;
-            document.getElementById('total-parent-m').innerText = s.pm; document.getElementById('total-parent-f').innerText = s.pf;
-        }
+            document.getElementById('stat-total').innerText = s.t;
+            document.getElementById('total-m').innerText = s.m;
+            document.getElementById('total-f').innerText = s.f;
+            document.getElementById('stat-child').innerText = s.c;
+            document.getElementById('total-child-m').innerText = s.cm; document.getElementById('total-child-f').innerText = s.cf;
+            document.getElementById('stat-elder').innerText = s.e;
+            document.getElementById('total-elder-m').innerText = s.em; document.getElementById('total-elder-f').innerText = s.ef;
+            document.getElementById('stat-parent').innerText = s.p;
+            document.getElementById('total-parent-m').innerText = s.pm; document.getElementById('total-parent-f').innerText = s.pf;
+        }
 
-        function updateMonthlySummary(records) {
-            const s = records.reduce((acc, curr) => {
-                const cm = Number(curr.childMale || 0), cf = Number(curr.childFemale || 0);
-                const em = Number(curr.elderMale || 0), ef = Number(curr.elderFemale || 0);
-                const pm = Number(curr.parentMale || 0), pf = Number(curr.parentFemale || 0);
-                
-                acc.t += (curr.totalCount || 0);
-                acc.cm += cm; acc.cf += cf;
-                acc.em += em; acc.ef += ef;
-                acc.pm += pm; acc.pf += pf;
-                return acc;
-            }, { t: 0, cm: 0, cf: 0, em: 0, ef: 0, pm: 0, pf: 0 });
+        function updateMonthlySummary(records) {
+            const s = records.reduce((acc, curr) => {
+                const cm = Number(curr.childMale || 0), cf = Number(curr.childFemale || 0);
+                const em = Number(curr.elderMale || 0), ef = Number(curr.elderFemale || 0);
+                const pm = Number(curr.parentMale || 0), pf = Number(curr.parentFemale || 0);
+                
+                acc.t += (curr.totalCount || 0);
+                acc.cm += cm; acc.cf += cf;
+                acc.em += em; acc.ef += ef;
+                acc.pm += pm; acc.pf += pf;
+                return acc;
+            }, { t: 0, cm: 0, cf: 0, em: 0, ef: 0, pm: 0, pf: 0 });
 
-            document.getElementById('month-stat-total').innerText = s.t;
-            document.getElementById('month-stat-child').innerText = s.cm + s.cf;
-            document.getElementById('m-child-m').innerText = s.cm; document.getElementById('m-child-f').innerText = s.cf;
-            document.getElementById('month-stat-elder').innerText = s.em + s.ef;
-            document.getElementById('m-elder-m').innerText = s.em; document.getElementById('m-elder-f').innerText = s.ef;
-            document.getElementById('month-stat-parent').innerText = s.pm + s.pf;
-            document.getElementById('m-parent-m').innerText = s.pm; document.getElementById('m-parent-f').innerText = s.pf;
-        }
+            document.getElementById('month-stat-total').innerText = s.t;
+            document.getElementById('month-stat-child').innerText = s.cm + s.cf;
+            document.getElementById('m-child-m').innerText = s.cm; document.getElementById('m-child-f').innerText = s.cf;
+            document.getElementById('month-stat-elder').innerText = s.em + s.ef;
+            document.getElementById('m-elder-m').innerText = s.em; document.getElementById('m-elder-f').innerText = s.ef;
+            document.getElementById('month-stat-parent').innerText = s.pm + s.pf;
+            document.getElementById('m-parent-m').innerText = s.pm; document.getElementById('m-parent-f').innerText = s.pf;
+        }
 
-        form.onsubmit = async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('submit-btn');
-            const originalHtml = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<i class="loading-spinner w-5 h-5" data-lucide="loader-2"></i>';
-            lucide.createIcons();
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submit-btn');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="loading-spinner w-5 h-5" data-lucide="loader-2"></i>';
+            lucide.createIcons();
 
-            const cM = Number(document.getElementById('childMale').value);
-            const cF = Number(document.getElementById('childFemale').value);
-            const eM = Number(document.getElementById('elderMale').value);
-            const eF = Number(document.getElementById('elderFemale').value);
-            const pM = Number(document.getElementById('parentMale').value);
-            const pF = Number(document.getElementById('parentFemale').value);
+            const cM = Number(document.getElementById('childMale').value);
+            const cF = Number(document.getElementById('childFemale').value);
+            const eM = Number(document.getElementById('elderMale').value);
+            const eF = Number(document.getElementById('elderFemale').value);
+            const pM = Number(document.getElementById('parentMale').value);
+            const pF = Number(document.getElementById('parentFemale').value);
 
-            const data = {
-                activityName: document.getElementById('activityName').value,
-                date: document.getElementById('date').value,
-                startTime: document.getElementById('startTime').value,
-                endTime: document.getElementById('endTime').value,
-                childMale: cM, childFemale: cF,
-                elderMale: eM, elderFemale: eF,
-                parentMale: pM, parentFemale: pF,
-                totalCount: cM + cF + eM + eF + pM + pF,
-                createdAt: Date.now()
-            };
+            const data = {
+                activityName: document.getElementById('activityName').value,
+                date: document.getElementById('date').value,
+                startTime: document.getElementById('startTime').value,
+                endTime: document.getElementById('endTime').value,
+                childMale: cM, childFemale: cF,
+                elderMale: eM, elderFemale: eF,
+                parentMale: pM, parentFemale: pF,
+                totalCount: cM + cF + eM + eF + pM + pF,
+                createdAt: Date.now()
+            };
 
-            try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs'), data);
-                form.reset();
-                document.getElementById('date').value = new Date().toISOString().split('T')[0];
-            } catch (err) { alert("儲存失敗: " + err.message); }
-            finally { 
-                btn.disabled = false; 
-                btn.innerHTML = originalHtml; 
-                lucide.createIcons(); 
-            }
-        };
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs'), data);
+                form.reset();
+                document.getElementById('date').value = new Date().toISOString().split('T')[0];
+            } catch (err) { alert("儲存失敗: " + err.message); }
+            finally { 
+                btn.disabled = false; 
+                btn.innerHTML = originalHtml; 
+                lucide.createIcons(); 
+            }
+        };
 
-        window.deleteRecord = async (id) => {
-            if (confirm("確定要刪除這筆紀錄嗎？")) {
-                try {
-                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activity_logs', id));
-                } catch (err) { alert("刪除失敗：" + err.message); }
-            }
-        };
+        window.deleteRecord = async (id) => {
+            if (confirm("確定要刪除這筆紀錄嗎？")) {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activity_logs', id));
+                } catch (err) { alert("刪除失敗：" + err.message); }
+            }
+        };
 
-        lucide.createIcons();
-    </script>
+        lucide.createIcons();
+    </script>
 </body>
 </html>
-
-但我弄成網站後 存了的紀錄 重整就會消失
