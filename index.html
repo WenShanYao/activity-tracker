@@ -13,7 +13,6 @@ import {
 import { 
   getAuth, 
   signInAnonymously, 
-  signInWithCustomToken, 
   onAuthStateChanged 
 } from 'firebase/auth';
 import { 
@@ -31,12 +30,27 @@ import {
   CheckCircle2 
 } from 'lucide-react';
 
-// Firebase 配置初始化
-const firebaseConfig = JSON.parse(__firebase_config);
+/**
+ * 部署說明：
+ * 1. 請將下方的 YOUR_FIREBASE_CONFIG 替換為您在 Firebase Console 取得的正式配置金鑰。
+ * 2. 如果在 Github Pages 部署，請確保您已安裝相關依賴：npm install firebase lucide-react
+ */
+const firebaseConfig = {
+  apiKey: "您的API金鑰",
+  authDomain: "您的專案ID.firebaseapp.com",
+  projectId: "您的專案ID",
+  storageBucket: "您的專案ID.appspot.com",
+  messagingSenderId: "您的傳送者ID",
+  appId: "您的APPID"
+};
+
+// 初始化 Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'activity-stats-pro';
+
+// 定義資料庫集合路徑 (部署到 Github Pages 時，建議自定義一個簡潔的路徑)
+const COLLECTION_NAME = "activity_logs";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -45,7 +59,6 @@ export default function App() {
   const [error, setError] = useState(null);
   const [monthFilter, setMonthFilter] = useState(new Date().toISOString().slice(0, 7));
 
-  // 表單狀態
   const [formData, setFormData] = useState({
     activityName: '',
     date: new Date().toISOString().split('T')[0],
@@ -59,56 +72,42 @@ export default function App() {
     parentFemale: 0
   });
 
-  // 1. 身分驗證 (遵循 RULE 3)
+  // 身分驗證
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        await signInAnonymously(auth);
       } catch (err) {
-        setError("身分驗證失敗，請重新整理頁面: " + err.message);
+        setError("Firebase 連線失敗，請檢查 API Key 設定: " + err.message);
       }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-    });
+    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
     return () => unsubscribe();
   }, []);
 
-  // 2. 監聽 Firestore 數據 (遵循 RULE 1 & 2)
+  // 監聽數據
   useEffect(() => {
     if (!user) return;
     setLoading(true);
 
-    // 必須使用規範的路徑: /artifacts/{appId}/public/data/{collection}
-    const logsCol = collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs');
-    
+    const logsCol = collection(db, COLLECTION_NAME);
     const unsubscribe = onSnapshot(logsCol, 
       (snapshot) => {
         const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        // 前端排序：日期 + 時間
-        const sorted = items.sort((a, b) => {
-          const dateA = new Date(`${a.date} ${a.startTime}`);
-          const dateB = new Date(`${b.date} ${b.startTime}`);
-          return dateB - dateA; // 降序排列 (新的在前)
-        });
+        const sorted = items.sort((a, b) => new Date(`${b.date} ${b.startTime}`) - new Date(`${a.date} ${a.startTime}`));
         setHistory(sorted);
         setLoading(false);
       }, 
       (err) => {
-        setError("資料同步失敗：" + err.message);
+        setError("讀取權限錯誤，請確認 Firestore 規則已開啟：" + err.message);
         setLoading(false);
       }
     );
-
     return () => unsubscribe();
   }, [user]);
 
-  // 數據統計邏輯
+  // 統計邏輯 (保持不變)
   const calculateStats = (records) => {
     return records.reduce((acc, curr) => {
       const cm = Number(curr.childMale || 0);
@@ -117,78 +116,40 @@ export default function App() {
       const ef = Number(curr.elderFemale || 0);
       const pm = Number(curr.parentMale || 0);
       const pf = Number(curr.parentFemale || 0);
-      
-      const total = cm + cf + em + ef + pm + pf;
-      
-      acc.total += total;
+      acc.total += (cm + cf + em + ef + pm + pf);
       acc.male += (cm + em + pm);
       acc.female += (cf + ef + pf);
-      acc.child += (cm + cf);
-      acc.elder += (em + ef);
-      acc.parent += (pm + pf);
-      
       return acc;
-    }, { total: 0, male: 0, female: 0, child: 0, elder: 0, parent: 0 });
+    }, { total: 0, male: 0, female: 0 });
   };
 
+  const monthlyStats = calculateStats(history.filter(r => r.date?.startsWith(monthFilter)));
   const overallStats = calculateStats(history);
-  const filteredHistory = history.filter(r => r.date?.startsWith(monthFilter));
-  const monthlyStats = calculateStats(filteredHistory);
 
-  // 提交表單
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!user) {
-      setError("尚未登入，無法儲存");
-      return;
-    }
-
-    const totalCount = 
-      Number(formData.childMale) + Number(formData.childFemale) +
-      Number(formData.elderMale) + Number(formData.elderFemale) +
-      Number(formData.parentMale) + Number(formData.parentFemale);
-
-    if (totalCount === 0 && !formData.activityName) {
-      setError("請填寫活動名稱或至少輸入一項人數");
-      return;
-    }
-
+    if (!user) return;
     try {
-      setError(null);
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs'), {
+      const totalCount = Number(formData.childMale) + Number(formData.childFemale) + Number(formData.elderMale) + Number(formData.elderFemale) + Number(formData.parentMale) + Number(formData.parentFemale);
+      await addDoc(collection(db, COLLECTION_NAME), {
         ...formData,
         totalCount,
         createdAt: serverTimestamp(),
         creator: user.uid
       });
-
-      // 重置表單
-      setFormData({
-        ...formData,
-        activityName: '',
-        childMale: 0,
-        childFemale: 0,
-        elderMale: 0,
-        elderFemale: 0,
-        parentMale: 0,
-        parentFemale: 0
-      });
-      
-      // 顯示成功提示 (自定義而非 alert)
-      const successMsg = document.getElementById('success-toast');
-      if (successMsg) {
-        successMsg.classList.remove('hidden');
-        setTimeout(() => successMsg.classList.add('hidden'), 3000);
-      }
+      setFormData({...formData, activityName: '', childMale: 0, childFemale: 0, elderMale: 0, elderFemale: 0, parentMale: 0, parentFemale: 0});
+      const toast = document.getElementById('success-toast');
+      toast?.classList.remove('hidden');
+      setTimeout(() => toast?.classList.add('hidden'), 3000);
     } catch (err) {
       setError("儲存失敗：" + err.message);
     }
   };
 
   const handleDelete = async (id) => {
-    // 雖然規範不建議 alert，但為了安全確認，這裡先保留簡單邏輯
+    if (!window.confirm("確定要刪除這筆紀錄嗎？")) return;
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activity_logs', id));
+      await deleteDoc(doc(db, COLLECTION_NAME, id));
     } catch (err) {
       setError("刪除失敗：" + err.message);
     }
@@ -198,251 +159,92 @@ export default function App() {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'activityName' || name === 'date' || name === 'startTime' || name === 'endTime' ? value : parseInt(value) || 0
+      [name]: ['activityName', 'date', 'startTime', 'endTime'].includes(name) ? value : parseInt(value) || 0
     }));
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8 font-sans">
-      {/* Header */}
-      <div className="max-w-6xl mx-auto mb-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
-              <ClipboardList className="text-indigo-600" />
-              活動數據統計系統
-            </h1>
-            <p className="text-slate-500 mt-1 flex items-center gap-2">
-              {user ? (
-                <span className="flex items-center gap-1 text-green-600 text-sm">
-                  <CheckCircle2 size={14} /> 雲端同步中 (UID: {user.uid.slice(0, 8)}...)
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 text-amber-500 text-sm animate-pulse">
-                  <RefreshCw size={14} className="animate-spin" /> 正在連接資料庫...
-                </span>
-              )}
-            </p>
-          </div>
-          
-          <div className="bg-white p-2 rounded-lg shadow-sm border border-slate-200 flex items-center gap-2">
-            <Calendar size={18} className="text-slate-400" />
-            <input 
-              type="month" 
-              value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-              className="border-none focus:ring-0 text-sm font-medium"
-            />
-          </div>
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
+      <div className="max-w-6xl mx-auto mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
+            <ClipboardList className="text-indigo-600" /> 活動數據統計 (部署版)
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">連線狀態：{user ? '✅ 已連線至 Firebase' : '⏳ 連線中...'}</p>
         </div>
-
-        {error && (
-          <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-3 animate-bounce">
-            <AlertCircle size={20} />
-            <p className="text-sm font-medium">{error}</p>
-          </div>
-        )}
-
-        <div id="success-toast" className="hidden mt-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl flex items-center gap-3">
-          <CheckCircle2 size={20} />
-          <p className="text-sm font-medium">數據已成功儲存至雲端！</p>
-        </div>
+        <input type="month" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="p-2 rounded-lg border border-slate-200" />
       </div>
 
+      {error && <div className="max-w-6xl mx-auto mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">{error}</div>}
+      <div id="success-toast" className="hidden max-w-6xl mx-auto mb-4 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">儲存成功！</div>
+
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Left Column: Form */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="bg-indigo-600 p-4">
-              <h2 className="text-white font-semibold flex items-center gap-2">
-                <Plus size={18} /> 新增活動紀錄
-              </h2>
+        {/* 表單區塊 */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-indigo-600"><Plus size={20}/>新增紀錄</h2>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <input type="text" name="activityName" value={formData.activityName} onChange={handleInputChange} placeholder="活動名稱" className="w-full p-2 border rounded" required />
+            <div className="grid grid-cols-2 gap-2">
+              <input type="date" name="date" value={formData.date} onChange={handleInputChange} className="p-2 border rounded text-sm" />
+              <input type="time" name="startTime" value={formData.startTime} onChange={handleInputChange} className="p-2 border rounded text-sm" />
             </div>
-            <form onSubmit={handleSubmit} className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">活動名稱</label>
-                <input 
-                  type="text" 
-                  name="activityName"
-                  value={formData.activityName}
-                  onChange={handleInputChange}
-                  placeholder="例如：週日親子讀經班"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
-                  required
-                />
+            <div className="space-y-2 border-t pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold">兒童 (男/女)</span>
+                <div className="flex gap-1"><input type="number" name="childMale" value={formData.childMale} onChange={handleInputChange} className="w-16 p-1 border rounded text-center" /><input type="number" name="childFemale" value={formData.childFemale} onChange={handleInputChange} className="w-16 p-1 border rounded text-center" /></div>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">日期</label>
-                  <input 
-                    type="date" 
-                    name="date"
-                    value={formData.date}
-                    onChange={handleInputChange}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">開始時間</label>
-                  <input 
-                    type="time" 
-                    name="startTime"
-                    value={formData.startTime}
-                    onChange={handleInputChange}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
-                  />
-                </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold">家長 (男/女)</span>
+                <div className="flex gap-1"><input type="number" name="parentMale" value={formData.parentMale} onChange={handleInputChange} className="w-16 p-1 border rounded text-center" /><input type="number" name="parentFemale" value={formData.parentFemale} onChange={handleInputChange} className="w-16 p-1 border rounded text-center" /></div>
               </div>
-
-              <hr className="border-slate-100" />
-
-              <div className="space-y-3">
-                <p className="text-xs font-bold text-slate-400 flex items-center gap-2"><Users size={14}/> 人數統計 (男 / 女)</p>
-                
-                {/* 兒童 */}
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2 text-sm font-medium w-24">
-                    <Baby size={16} className="text-blue-500" /> 兒童
-                  </div>
-                  <div className="flex gap-2 flex-1">
-                    <input type="number" name="childMale" value={formData.childMale} onChange={handleInputChange} className="w-full p-2 bg-blue-50/50 border border-blue-100 rounded text-center text-sm" placeholder="男" />
-                    <input type="number" name="childFemale" value={formData.childFemale} onChange={handleInputChange} className="w-full p-2 bg-pink-50/50 border border-pink-100 rounded text-center text-sm" placeholder="女" />
-                  </div>
-                </div>
-
-                {/* 家長/成人 */}
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2 text-sm font-medium w-24">
-                    <UserRound size={16} className="text-indigo-500" /> 家長
-                  </div>
-                  <div className="flex gap-2 flex-1">
-                    <input type="number" name="parentMale" value={formData.parentMale} onChange={handleInputChange} className="w-full p-2 bg-blue-50/50 border border-blue-100 rounded text-center text-sm" placeholder="男" />
-                    <input type="number" name="parentFemale" value={formData.parentFemale} onChange={handleInputChange} className="w-full p-2 bg-pink-50/50 border border-pink-100 rounded text-center text-sm" placeholder="女" />
-                  </div>
-                </div>
-
-                {/* 長者 */}
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-2 text-sm font-medium w-24">
-                    <Heart size={16} className="text-emerald-500" /> 長者
-                  </div>
-                  <div className="flex gap-2 flex-1">
-                    <input type="number" name="elderMale" value={formData.elderMale} onChange={handleInputChange} className="w-full p-2 bg-blue-50/50 border border-blue-100 rounded text-center text-sm" placeholder="男" />
-                    <input type="number" name="elderFemale" value={formData.elderFemale} onChange={handleInputChange} className="w-full p-2 bg-pink-50/50 border border-pink-100 rounded text-center text-sm" placeholder="女" />
-                  </div>
-                </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold">長者 (男/女)</span>
+                <div className="flex gap-1"><input type="number" name="elderMale" value={formData.elderMale} onChange={handleInputChange} className="w-16 p-1 border rounded text-center" /><input type="number" name="elderFemale" value={formData.elderFemale} onChange={handleInputChange} className="w-16 p-1 border rounded text-center" /></div>
               </div>
-
-              <button 
-                type="submit" 
-                disabled={!user}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-indigo-200 transition-all active:scale-95 disabled:opacity-50 mt-4 flex items-center justify-center gap-2"
-              >
-                <Plus size={20} /> 儲存此筆紀錄
-              </button>
-            </form>
-          </div>
+            </div>
+            <button type="submit" disabled={!user} className="w-full bg-indigo-600 text-white p-3 rounded-xl font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors">儲存數據</button>
+          </form>
         </div>
 
-        {/* Right Column: Dashboard & History */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* Dashboard Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-              <p className="text-slate-400 text-xs font-bold uppercase">本月總人數</p>
-              <h3 className="text-2xl font-black text-slate-800">{monthlyStats.total}</h3>
+        {/* 歷史清單區塊 */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-white p-4 rounded-xl border border-slate-200 text-center">
+              <p className="text-xs text-slate-400 font-bold">本月總計</p>
+              <p className="text-2xl font-black text-indigo-600">{monthlyStats.total}</p>
             </div>
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-              <p className="text-blue-400 text-xs font-bold uppercase">本月男性</p>
-              <h3 className="text-2xl font-black text-slate-800">{monthlyStats.male}</h3>
+            <div className="bg-white p-4 rounded-xl border border-slate-200 text-center">
+              <p className="text-xs text-blue-400 font-bold">本月男</p>
+              <p className="text-2xl font-black text-slate-700">{monthlyStats.male}</p>
             </div>
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-              <p className="text-pink-400 text-xs font-bold uppercase">本月女性</p>
-              <h3 className="text-2xl font-black text-slate-800">{monthlyStats.female}</h3>
-            </div>
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-              <p className="text-indigo-400 text-xs font-bold uppercase">歷史總累計</p>
-              <h3 className="text-2xl font-black text-slate-800">{overallStats.total}</h3>
+            <div className="bg-white p-4 rounded-xl border border-slate-200 text-center">
+              <p className="text-xs text-pink-400 font-bold">本月女</p>
+              <p className="text-2xl font-black text-slate-700">{monthlyStats.female}</p>
             </div>
           </div>
 
-          {/* History List */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <h2 className="font-bold text-slate-700 flex items-center gap-2">
-                <Clock size={18} /> 最近活動紀錄
-              </h2>
-              <span className="text-xs text-slate-400">顯示最近 {history.length} 筆資料</span>
-            </div>
-
-            <div className="overflow-x-auto">
-              {loading ? (
-                <div className="p-12 flex flex-col items-center justify-center gap-4">
-                  <RefreshCw className="text-indigo-500 animate-spin" size={32} />
-                  <p className="text-slate-400 font-medium">載入中...</p>
-                </div>
-              ) : history.length === 0 ? (
-                <div className="p-12 text-center">
-                  <p className="text-slate-400 italic">目前尚無紀錄</p>
-                </div>
-              ) : (
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-400 text-xs font-bold uppercase">
-                      <th className="px-6 py-3">活動資訊</th>
-                      <th className="px-6 py-3">對象統計</th>
-                      <th className="px-6 py-3 text-center">總計</th>
-                      <th className="px-6 py-3">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {history.map((record) => (
-                      <tr key={record.id} className="hover:bg-slate-50 transition-colors group">
-                        <td className="px-6 py-4">
-                          <div className="font-bold text-slate-800">{record.activityName}</div>
-                          <div className="text-xs text-slate-400 flex items-center gap-1 mt-1">
-                            <Calendar size={12} /> {record.date} | <Clock size={12} /> {record.startTime} - {record.endTime}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex gap-3 text-xs">
-                            <div className="flex flex-col">
-                              <span className="text-blue-500 font-bold">兒: {Number(record.childMale) + Number(record.childFemale)}</span>
-                              <span className="text-slate-400">({record.childMale}M/{record.childFemale}F)</span>
-                            </div>
-                            <div className="flex flex-col border-l border-slate-200 pl-3">
-                              <span className="text-indigo-500 font-bold">長: {Number(record.parentMale) + Number(record.parentFemale)}</span>
-                              <span className="text-slate-400">({record.parentMale}M/{record.parentFemale}F)</span>
-                            </div>
-                            <div className="flex flex-col border-l border-slate-200 pl-3">
-                              <span className="text-emerald-500 font-bold">老: {Number(record.elderMale) + Number(record.elderFemale)}</span>
-                              <span className="text-slate-400">({record.elderMale}M/{record.elderFemale}F)</span>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <span className="inline-block px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-black text-sm">
-                            {record.totalCount}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <button 
-                            onClick={() => handleDelete(record.id)}
-                            className="text-slate-300 hover:text-red-500 transition-colors p-2 rounded-lg hover:bg-red-50"
-                            title="刪除紀錄"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-xs text-slate-400 uppercase">
+                <tr>
+                  <th className="p-4">活動資訊</th>
+                  <th className="p-4 text-center">人數</th>
+                  <th className="p-4">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {history.map(record => (
+                  <tr key={record.id} className="hover:bg-slate-50">
+                    <td className="p-4">
+                      <div className="font-bold">{record.activityName}</div>
+                      <div className="text-xs text-slate-400">{record.date} {record.startTime}</div>
+                    </td>
+                    <td className="p-4 text-center font-black text-indigo-600">{record.totalCount}</td>
+                    <td className="p-4"><button onClick={() => handleDelete(record.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16}/></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
